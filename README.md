@@ -1,5 +1,6 @@
 # 《三角洲行动》密码工具
-由原项目https://github.com/izhangguapi/DeltaForceCodeAssistant修改优化而来
+由原项目https://github.com/izhangguapi/DeltaForceCodeAssistant
+修改优化而来
 
 整合**摩斯码识别**与**指纹密码破解**两大功能，辅助完成《三角洲行动》骇客电脑小游戏。程序仅读取屏幕截图，不修改任何游戏数据。
 
