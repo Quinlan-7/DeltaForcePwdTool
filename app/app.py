@@ -56,8 +56,8 @@ class AppController:
 
         # 启动轮询
         self.gui.after(80, self._poll)
-        self.gui.append_log("程序启动成功。游戏内按 F 交互后自动检测密码界面；"
-                            "按 ~ 手动扫描；F7 暂停/恢复；F8 完全退出。")
+        self.gui.append_log("程序启动成功。")
+        self.gui.append_log("按 F 交互后自动检测密码界面；按 ~ 手动扫描；")
         self.gui.mainloop()
 
     # ── OCR 初始化（后台线程）───────────────────────────────
@@ -67,7 +67,6 @@ class AppController:
         if ok:
             mode = "本地模型" if self.ocr.using_local_models else "内置模型"
             self.gui.set_badge("ocr", "就绪", OK)
-            self.append_log(f"OCR 引擎初始化成功（{mode}，离线可用，无微信依赖）")
         else:
             self.gui.set_badge("ocr", "失败", DANGER)
             self.append_log(f"OCR 引擎初始化失败: {self.ocr.error}")
@@ -253,13 +252,8 @@ class AppController:
 
     # ── 关闭 / 退出 ─────────────────────────────────────────
     def on_close_request(self):
-        """点窗口 X：隐藏到托盘（若启用），否则退出。"""
-        tray_on = self.cfg_store.effective.get("ui", {}).get("tray", True)
-        if tray_on and self.tray._available:
-            self.gui.withdraw()
-            self.append_log("已最小化到系统托盘，双击托盘图标可恢复")
-        else:
-            self._final_exit()
+        """点窗口 X：完全退出（不驻留托盘，无后台残留）。"""
+        self._final_exit()
 
     def _final_exit(self):
         if self._exit_requested:
@@ -267,11 +261,22 @@ class AppController:
         self._exit_requested = True
         try:
             self.hotkeys.stop()
+        except Exception:
+            pass
+        try:
             self.ocr.destroy()
+        except Exception:
+            pass
+        try:
             self.learning.save(force=True)
+        except Exception:
+            pass
+        try:
             self.tray.stop()
         except Exception:
             pass
+        import time as _t
+        _t.sleep(0.3)   # 让托盘线程注销图标，避免残留幽灵图标
         try:
             self.gui.destroy_all()
         except Exception:

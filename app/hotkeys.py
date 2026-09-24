@@ -222,6 +222,8 @@ class HotkeyManager:
             if nCode >= 0 and wParam == WM_KEYDOWN and self._observe_vk:
                 kb = ctypes.cast(lParam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
                 if kb.vkCode == self._observe_vk and not (kb.flags & 0x80):
+                    # 仅当前台是游戏时触发；按键本身始终放行（CallNextHookEx），
+                    # 游戏内打字 / 奔跑(Shift)/下蹲(Ctrl) 按 F 都不受影响。
                     if _foreground_is_game():
                         self.events.put(self._observe_name)
         except Exception:
