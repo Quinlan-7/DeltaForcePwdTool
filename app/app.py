@@ -43,6 +43,17 @@ class AppController:
         # 注册热键
         self._apply_hotkeys_internal(silent=True)
 
+        # 启动系统托盘后台驻留
+        try:
+            self.tray.start(
+                on_show=self._tray_show,
+                on_pause=self._tray_pause,
+                on_exit=self._tray_exit,
+                paused_getter=lambda: self.engine.paused,
+            )
+        except Exception:
+            self.tray._available = False
+
         # 启动轮询
         self.gui.after(80, self._poll)
         self.gui.append_log("程序启动成功。游戏内按 F 交互后自动检测密码界面；"
@@ -102,6 +113,11 @@ class AppController:
                            OK if self.engine.hotkey_enabled else DIM)
         self.gui.set_badge("state",
                            "识别中..." if self.engine.busy else "空闲", ACCENT)
+        try:
+            self.gui.btn_pause.config(
+                text="恢复自动识别" if self.engine.paused else "暂停自动识别")
+        except Exception:
+            pass
 
     # ── 异常钩子 ────────────────────────────────────────────
     def _install_exception_hooks(self):
@@ -132,6 +148,24 @@ class AppController:
 
     def on_hotkey_toggle(self, enabled: bool):
         self.engine.set_hotkey_enabled(bool(enabled))
+
+    # ── 托盘回调（来自 pystray 线程，需 marshal 到主线程）──────
+    def _tray_show(self):
+        def _show():
+            try:
+                self.gui.deiconify()
+                self.gui.lift()
+                self.gui.attributes("-topmost", True)
+                self.gui.after(150, lambda: self.gui.attributes("-topmost", False))
+            except Exception:
+                pass
+        self.gui.after(0, _show)
+
+    def _tray_pause(self):
+        self.engine.handle("pause")   # 走队列，线程安全
+
+    def _tray_exit(self):
+        self.engine.shutdown()
 
     def on_manual_click(self):
         self.engine.handle("manual")

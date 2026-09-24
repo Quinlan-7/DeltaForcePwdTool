@@ -87,6 +87,7 @@ class HotkeyManager:
             parts = str(key).lower().split("+")
             if len(parts) > 1:
                 mods = 0
+                bad_mod = False
                 for p in parts[:-1]:
                     if p == "ctrl":
                         mods |= MOD_CONTROL
@@ -96,12 +97,14 @@ class HotkeyManager:
                         mods |= MOD_SHIFT
                     else:
                         invalid.append((name, key))
+                        bad_mod = True
                         break
-                else:
-                    vk = _vk_of(parts[-1])
-                    if vk is None:
-                        invalid.append((name, key))
-                        continue
+                if bad_mod:
+                    continue
+                vk = _vk_of(parts[-1])
+                if vk is None:
+                    invalid.append((name, key))
+                    continue
             new_vk[name] = (mods, vk)
         self._bindings = {n: k for n, k in bindings.items() if (n, k) not in invalid}
         self._vk_map = new_vk

@@ -106,13 +106,13 @@ class MainWindow(tk.Tk):
                 self.iconbitmap(ICON_PATH)
         except Exception:
             pass
-        self.minsize(980, 660)
-        self.geometry("1040x700")
+        self.minsize(1080, 760)
+        self.geometry("1180x860")
 
         self._build_style()
         self._build_layout()
-        self._load_controls()
         self._build_float_hint()
+        self._load_controls()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -154,13 +154,13 @@ class MainWindow(tk.Tk):
     def _vcard(self, parent, title: str):
         frame = tk.Frame(parent, bg=CARD, highlightbackground=LINE,
                          highlightthickness=1)
-        frame.pack(fill="x", padx=4, pady=4)
+        frame.pack(fill="x", padx=4, pady=2)
         head = tk.Label(frame, text=title, bg=CARD, fg=ACCENT,
-                        font=_font(11, True), anchor="w")
-        head.pack(fill="x", padx=10, pady=(8, 2))
+                        font=_font(10, True), anchor="w")
+        head.pack(fill="x", padx=10, pady=(5, 1))
         tk.Frame(frame, bg=LINE, height=1).pack(fill="x", padx=6)
         body = tk.Frame(frame, bg=CARD)
-        body.pack(fill="both", expand=True, padx=10, pady=8)
+        body.pack(fill="x", padx=10, pady=4)
         return body
 
     def _build_layout(self):
@@ -188,49 +188,29 @@ class MainWindow(tk.Tk):
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=8, pady=4)
         body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=3)
-        body.grid_columnconfigure(1, weight=2)
+        body.grid_columnconfigure(0, weight=26)
+        body.grid_columnconfigure(1, weight=34)
 
         # 左栏
         left = tk.Frame(body, bg=BG)
         left.grid(row=0, column=0, sticky="nsew")
-        left.grid_rowconfigure(1, weight=1)
+        left.grid_rowconfigure(0, weight=1)
+        left.grid_rowconfigure(1, weight=0)
         left.grid_columnconfigure(0, weight=1)
 
         self._build_result_card(left)
         self._build_log_card(left)
 
-        # 右栏（可滚动，适配小屏）
+        # 右栏：五张卡片直接排布，全部完整可见
         right = tk.Frame(body, bg=BG)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.grid_rowconfigure(0, weight=1)
+        right.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
         right.grid_columnconfigure(0, weight=1)
-        canvas = tk.Canvas(right, bg=BG, highlightthickness=0, bd=0)
-        sb = tk.Scrollbar(right, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.grid(row=0, column=0, sticky="nsew")
-        sb.grid(row=0, column=1, sticky="ns")
-        inner = tk.Frame(canvas, bg=BG)
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>",
-                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        self._right_canvas = canvas
 
-        def _on_wheel(e):
-            canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
-
-        def _bind_wheel(w):
-            w.bind("<MouseWheel>", _on_wheel)
-            for c in w.winfo_children():
-                _bind_wheel(c)
-
-        _bind_wheel(inner)
-
-        self._build_control_card(inner)
-        self._build_param_card(inner)
-        self._build_hotkey_card(inner)
-        self._build_config_card(inner)
-        self._build_perf_card(inner)
+        self._build_control_card(right)
+        self._build_param_card(right)
+        self._build_hotkey_card(right)
+        self._build_config_card(right)
+        self._build_perf_card(right)
 
         # 底部提示
         foot = tk.Label(self, text="游戏内按 F 交互自动检测 ｜ ~ 手动扫描 ｜ F7 暂停/恢复自动识别 ｜ F8 完全退出",
@@ -242,12 +222,12 @@ class MainWindow(tk.Tk):
         body = self._card(parent, "识别结果", 0, 0)
 
         self.result_type = tk.Label(body, text="等待识别...", bg=CARD,
-                                    fg=DIM, font=_font(12, True))
+                                    fg=DIM, font=_font(11, True))
         self.result_type.pack(anchor="w")
 
         self.result_big = tk.Label(body, text="--", bg=CARD, fg=TEXT,
-                                   font=_font(26, True), anchor="w")
-        self.result_big.pack(anchor="w", pady=(2, 4))
+                                   font=_font(20, True), anchor="w")
+        self.result_big.pack(anchor="w", pady=(2, 2))
 
         info = tk.Frame(body, bg=CARD)
         info.pack(fill="x")
@@ -291,7 +271,7 @@ class MainWindow(tk.Tk):
         wrap.pack(fill="both", expand=True)
         self.log_text = tk.Text(wrap, bg="#121A24", fg=TEXT, font=_font(9),
                                 relief="flat", wrap="word", padx=6, pady=4,
-                                state="disabled", height=10)
+                                state="disabled", height=5)
         sb = tk.Scrollbar(wrap, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.pack(side="left", fill="both", expand=True)
@@ -343,21 +323,21 @@ class MainWindow(tk.Tk):
             tk.Checkbutton(body, text=text, variable=var, bg=CARD, fg=TEXT,
                            selectcolor=CARD2, activebackground=CARD,
                            activeforeground=TEXT, font=_font(9),
-                           command=lambda f=flag: cb(f)).pack(anchor="w", pady=2)
+                           command=lambda f=flag: cb(f)).pack(anchor="w", pady=1)
 
         row = tk.Frame(body, bg=CARD)
-        row.pack(fill="x", pady=(8, 0))
+        row.pack(fill="x", pady=(5, 0))
         self.btn_manual = tk.Button(row, text="手动扫描 (~)",
                                     command=self.app.on_manual_click,
                                     bg=ACCENT, fg="#0B1220", relief="flat",
-                                    font=_font(10, True), padx=14, pady=6,
+                                    font=_font(10, True), padx=12, pady=4,
                                     activebackground=ACCENT_D,
                                     activeforeground="#FFFFFF")
         self.btn_manual.pack(side="left", padx=(0, 8))
         self.btn_pause = tk.Button(row, text="暂停自动识别",
                                    command=self.app.on_pause_click,
                                    bg=CARD2, fg=TEXT, relief="flat",
-                                   font=_font(10), padx=14, pady=6,
+                                   font=_font(10), padx=12, pady=4,
                                    activebackground=CARD)
         self.btn_pause.pack(side="left")
 
@@ -390,13 +370,13 @@ class MainWindow(tk.Tk):
             ("密码界面检测超时", self.var_timeout, (2.0, 5.0, 0.5), on_timeout),
         ):
             wrap = tk.Frame(body, bg=CARD)
-            wrap.pack(fill="x", pady=2)
+            wrap.pack(fill="x", pady=1)
             tk.Label(wrap, text=label, bg=CARD, fg=DIM,
                      font=_font(9)).pack(side="left")
             sc = tk.Scale(wrap, from_=rng[0], to=rng[1], resolution=rng[2],
                           orient="horizontal", variable=var, command=cmd,
                           bg=CARD, fg=TEXT, troughcolor=CARD2,
-                          highlightthickness=0, length=180, font=_font(8))
+                          highlightthickness=0, length=150, font=_font(8))
             sc.pack(side="left", padx=6)
             txt = tk.Label(wrap, text="--", bg=CARD, fg=ACCENT, font=_font(9, True))
             txt.pack(side="left")
@@ -421,16 +401,16 @@ class MainWindow(tk.Tk):
             r, c = divmod(i, 2)
             tk.Label(grid, text=label, bg=CARD, fg=DIM,
                      font=_font(9)).grid(row=r, column=c * 2, sticky="w",
-                                         padx=(0, 6), pady=3)
+                                         padx=(0, 6), pady=2)
             var = tk.StringVar()
             e = tk.Entry(grid, textvariable=var, bg=CARD2, fg=TEXT,
                          insertbackground=TEXT, relief="flat", width=8,
                          justify="center", font=_font(9))
-            e.grid(row=r, column=c * 2 + 1, sticky="w", pady=3, ipady=2)
+            e.grid(row=r, column=c * 2 + 1, sticky="w", pady=2, ipady=1)
             self.hk_vars[key] = var
         tk.Button(body, text="应用热键", command=self.app.apply_hotkeys,
                   bg=CARD2, fg=ACCENT, relief="flat", font=_font(9),
-                  activebackground=CARD).pack(anchor="w", pady=(6, 0))
+                  activebackground=CARD).pack(anchor="w", pady=(4, 0))
 
     def _build_config_card(self, parent):
         body = self._vcard(parent, "配置与学习")
@@ -445,17 +425,17 @@ class MainWindow(tk.Tk):
         tk.Checkbutton(body, text="自主学习（积累识别经验，越用越快）",
                        variable=self.var_learn, command=on_learn,
                        bg=CARD, fg=TEXT, selectcolor=CARD2,
-                       activebackground=CARD, font=_font(9)).pack(anchor="w", pady=2)
+                       activebackground=CARD, font=_font(9)).pack(anchor="w", pady=1)
 
         row = tk.Frame(body, bg=CARD)
-        row.pack(fill="x", pady=(6, 0))
+        row.pack(fill="x", pady=(4, 0))
         self.cfg_buttons = {}
         for text, cmd in (
             ("导出配置", self.app.on_export), ("导入配置", self.app.on_import),
             ("重置默认", self.app.on_reset), ("清空学习", self.app.on_clear_learn),
         ):
             btn = tk.Button(row, text=text, command=cmd, bg=CARD2, fg=TEXT,
-                            relief="flat", font=_font(9), padx=8, pady=4,
+                            relief="flat", font=_font(9), padx=8, pady=2,
                             activebackground=CARD)
             btn.pack(side="left", padx=(0, 6))
             self.cfg_buttons[text] = btn
@@ -472,10 +452,10 @@ class MainWindow(tk.Tk):
             r, c = divmod(i, 2)
             tk.Label(grid, text=label, bg=CARD, fg=DIM,
                      font=_font(9)).grid(row=r, column=c * 2, sticky="w",
-                                         padx=(0, 6), pady=2)
+                                         padx=(0, 6), pady=1)
             v = tk.Label(grid, text="--", bg=CARD, fg=TEXT,
                          font=_font(9), anchor="w")
-            v.grid(row=r, column=c * 2 + 1, sticky="w", pady=2)
+            v.grid(row=r, column=c * 2 + 1, sticky="w", pady=1)
             self.perf_labels[key] = v
 
     # ── 悬浮提示 ────────────────────────────────────────────

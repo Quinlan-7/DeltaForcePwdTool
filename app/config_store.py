@@ -155,20 +155,21 @@ class ConfigStore:
             except (OSError, ValueError):
                 loaded = {}
             self.raw = _merge(_DEFAULT_CONFIG, loaded)
-            hk = self.raw.get("hotkeys", {})
-            # 旧版迁移：F5/F6/END -> ~ / F7 / F8；交互触发由 F 承担
-            if "morse" in hk:
-                hk.pop("morse", None)
-            if "fingerprint" in hk:
-                hk.pop("fingerprint", None)
-            if hk.get("exit", "").lower() in ("end", "esc"):
-                hk["exit"] = "f8"
-            hk.setdefault("manual", "~")
-            hk.setdefault("pause", "f7")
-            hk.setdefault("exit", "f8")
-            hk.setdefault("interact", "f")
+            self._migrate_hotkeys()
         self.refresh()
         return self.effective
+
+    def _migrate_hotkeys(self) -> None:
+        """旧版热键迁移：F5/F6/END -> ~ / F7 / F8；补齐默认键位。"""
+        hk = self.raw.get("hotkeys", {})
+        hk.pop("morse", None)
+        hk.pop("fingerprint", None)
+        if hk.get("exit", "").lower() in ("end", "esc"):
+            hk["exit"] = "f8"
+        hk.setdefault("manual", "~")
+        hk.setdefault("pause", "f7")
+        hk.setdefault("exit", "f8")
+        hk.setdefault("interact", "f")
 
     def refresh(self) -> None:
         self.effective = effective_config(self.raw)
@@ -208,6 +209,7 @@ class ConfigStore:
             with open(src_path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
             self.raw = _merge(_DEFAULT_CONFIG, loaded)
+            self._migrate_hotkeys()
             self._save_raw()
             self.refresh()
             return True
