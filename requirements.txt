@@ -1,0 +1,11 @@
+# 三角洲密码工具 运行依赖（打包时由 PyInstaller 收集）
+# 说明：所有模型文件位于程序同级 models/ 目录，离线运行，无需微信。
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=9.0
+rapidocr-onnxruntime>=1.3.20
+onnxruntime>=1.17
+pystray>=0.19
+
+# 构建工具（仅打包时需要）
+# pyinstaller>=6.0
