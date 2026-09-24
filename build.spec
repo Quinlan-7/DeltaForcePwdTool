@@ -13,7 +13,6 @@ a = Analysis(
     datas=rapid_datas,
     hiddenimports=rapid_hidden + [
         'onnxruntime',
-        'pystray',
         'PIL._tkinter_finder',
     ],
     hookspath=[],

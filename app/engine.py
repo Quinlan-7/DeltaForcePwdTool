@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-工作流引擎：热键事件分发、自动识别（F 交互后多帧检测）、手动扫描、
-暂停/恢复、完全退出、性能统计与内存回收。
-
-自动识别时序（重点修复）：
-    F 键交互 → 仅当游戏窗口在前台时启动检测循环
-    → 按采样间隔多帧抓取中心扫描区
-    → 检测到摩斯界面 → 立即破译；检测到指纹界面 → 立即破译
-    → 超时(默认3s)仍未出现密码界面 → 判定为拾取物资/开启盒子，直接跳过
+工作流引擎：全自动识别（无任何全局热键/键盘钩子，避免触发游戏反作弊）。
+- 后台轮询线程每 sample_interval（默认0.8s）检测一次屏幕中心扫描区；
+- 仅当前台是游戏窗口时才抓取识别，其他时候完全静默，低占用；
+- 检测到摩斯/指纹密码界面立即破译；未发现则下一周期继续。
+- 暂停 / 手动扫描 / 退出均由 GUI 触发，不监听任何全局按键。
 """
 
 import gc
@@ -47,16 +44,14 @@ class ScanContext:
 
 
 class Engine:
-    def __init__(self, cfg_store, ocr, learning, hotkeys):
+    def __init__(self, cfg_store, ocr, learning):
         self.cfg_store = cfg_store
         self.ocr = ocr
         self.learning = learning
-        self.hotkeys = hotkeys
         self.outbox: queue.Queue = queue.Queue()
 
         self.auto_enabled = bool(cfg_store.effective.get("auto_detect", True))
         self.paused = False
-        self.hotkey_enabled = True
         self.busy = False
         self._busy_lock = threading.Lock()
         self._cooldown_until = 0.0
@@ -65,6 +60,8 @@ class Engine:
         self._ocr_ms = 0.0
         self._detect_ms = 0.0
         self._ctx = None
+        self._stop = threading.Event()
+        self._poll_thread = None
 
     # ── 内部消息 ────────────────────────────────────────────
     def log(self, msg: str) -> None:
@@ -75,43 +72,32 @@ class Engine:
 
     def _push_state(self) -> None:
         self.outbox.put({"kind": "state", "auto": self.auto_enabled,
-                         "paused": self.paused,
-                         "hotkey": self.hotkey_enabled, "busy": self.busy})
+                         "paused": self.paused, "busy": self.busy})
 
-    # ── 热键事件 ────────────────────────────────────────────
-    def handle(self, name: str) -> None:
-        if name == "manual":
-            self._start_manual()
-        elif name == "pause":
-            self.paused = not self.paused
-            self.log("自动识别已暂停" if self.paused else "自动识别已恢复")
-            self._push_state()
-        elif name == "exit":
-            self.log("收到退出指令，正在清理并退出...")
-            self.shutdown()
-        elif name == "interact":
-            self._on_interact()
+    # ── 自动轮询主循环（后台线程）──────────────────────────
+    def start_poller(self) -> None:
+        if self._poll_thread and self._poll_thread.is_alive():
+            return
+        self._stop.clear()
+        self._poll_thread = threading.Thread(
+            target=self._poll_loop, daemon=True, name="auto-poll")
+        self._poll_thread.start()
 
-    # ── 自动识别（F 交互触发）───────────────────────────────
-    def _on_interact(self) -> None:
-        if not self.hotkey_enabled:
-            return
-        if not self.auto_enabled:
-            return
-        if self.paused:
-            return
-        if self.busy:
-            return
-        if time.time() < self._cooldown_until:
-            return
+    def _poll_loop(self) -> None:
         titles = self.cfg_store.effective.get("misc", {}).get("game_window_titles")
-        if not game_window_foreground(titles):
-            self.log("安全机制：游戏窗口不在前台，忽略本次 F 触发")
-            return
-        threading.Thread(target=self._auto_scan, daemon=True,
-                         name="auto-scan").start()
+        while not self._stop.is_set():
+            try:
+                if (self.auto_enabled and not self.paused and not self.busy
+                        and time.time() >= self._cooldown_until
+                        and game_window_foreground(titles)):
+                    self._detect_once()
+            except Exception as e:  # noqa: BLE001
+                self.log(f"自动检测异常: {type(e).__name__}: {e}")
+            interval = float(self.cfg_store.effective.get("sample_interval", 0.8))
+            self._stop.wait(max(0.3, interval))
 
-    def _auto_scan(self) -> None:
+    def _detect_once(self) -> None:
+        """抓取一帧并判定是否为密码界面；是则破译。"""
         with self._busy_lock:
             if self.busy:
                 return
@@ -119,51 +105,38 @@ class Engine:
             self._push_state()
         try:
             cfg = self.cfg_store.effective
-            timeout = float(cfg.get("detect_timeout", 3.0))
-            interval = float(cfg.get("sample_interval", 0.5))
             ctx = self._make_ctx()
             box = capture.scan_box(cfg)
             origin = (box[0], box[1])
-            deadline = time.time() + timeout
-            self.status("自动检测中...")
-            while time.time() < deadline:
-                if self.paused or not self.auto_enabled:
-                    break
-                t0 = time.time()
-                scan_pil = capture.grab(box)
-                kind, detail = detector.detect(
-                    scan_pil, cfg, origin, self.ocr, self._known())
-                self._detect_ms = round((time.time() - t0) * 1000, 1)
-                if kind == "morse":
-                    self.status("检测到摩斯密码界面，开始破译")
-                    result = morse.run_morse(cfg, ctx)
-                    self.outbox.put({"kind": "result", "result": result})
-                    self._cooldown_until = time.time() + 1.0
-                    return
-                if kind == "fingerprint":
-                    self.status("检测到指纹密码界面，开始破译")
-                    result = fingerprint.run_fingerprint(cfg, ctx)
-                    self.outbox.put({"kind": "result", "result": result})
-                    self._cooldown_until = time.time() + 1.0
-                    return
-                elapsed = time.time() - t0
-                time.sleep(max(0.05, interval - elapsed))
-            self.status("未检测到密码界面（拾取物资/盒子场景，已跳过）")
-            self.log("3秒内未检测到密码界面，判定为物资/盒子场景，已跳过破译")
+            t0 = time.time()
+            scan_pil = capture.grab(box)
+            kind, detail = detector.detect(
+                scan_pil, cfg, origin, self.ocr, self._known())
+            self._detect_ms = round((time.time() - t0) * 1000, 1)
+            if kind == "morse":
+                self.status("检测到摩斯密码界面，开始破译")
+                result = morse.run_morse(cfg, ctx)
+                self.outbox.put({"kind": "result", "result": result})
+                self._cooldown_until = time.time() + 1.5
+                return
+            if kind == "fingerprint":
+                self.status("检测到指纹密码界面，开始破译")
+                result = fingerprint.run_fingerprint(cfg, ctx)
+                self.outbox.put({"kind": "result", "result": result})
+                self._cooldown_until = time.time() + 1.5
+                return
         except Exception as e:  # noqa: BLE001
             self.log(f"自动识别异常: {type(e).__name__}: {e}")
         finally:
             with self._busy_lock:
                 self.busy = False
             self._scan_count += 1
-            if self._scan_count % 20 == 0:
+            if self._scan_count % 25 == 0:
                 gc.collect()
             self._push_state()
 
-    # ── 手动扫描（~）────────────────────────────────────────
-    def _start_manual(self) -> None:
-        if not self.hotkey_enabled:
-            return
+    # ── 手动扫描（GUI 按钮触发，非热键）─────────────────────
+    def start_manual(self) -> None:
         if self.busy:
             self.log("已有识别任务进行中，请稍候")
             return
@@ -189,6 +162,7 @@ class Engine:
             scan_pil = capture.grab(box)
             kind, detail = detector.detect(scan_pil, cfg, origin,
                                            self.ocr, self._known())
+            self._detect_ms = round((time.time() - t0) * 1000, 1)
             if kind == "morse":
                 result = morse.run_morse(cfg, ctx)
                 self.outbox.put({"kind": "result", "result": result})
@@ -197,15 +171,12 @@ class Engine:
                 self.outbox.put({"kind": "result", "result": result})
             else:
                 self.status("未检测到密码界面")
-                self.log("手动扫描未发现摩斯/指纹密码界面")
         except Exception as e:  # noqa: BLE001
-            self.log(f"手动扫描异常: {type(e).__name__}: {e}")
+            self.log("手动扫描异常: " + f"{type(e).__name__}: {e}")
         finally:
             with self._busy_lock:
                 self.busy = False
             self._scan_count += 1
-            if self._scan_count % 20 == 0:
-                gc.collect()
             self._push_state()
 
     # ── 辅助 ────────────────────────────────────────────────
@@ -225,19 +196,9 @@ class Engine:
         self.log("自动识别已开启" if enabled else "自动识别已关闭")
         self._push_state()
 
-    def set_paused(self, paused: bool) -> None:
-        self.paused = paused
-        self.log("自动识别已暂停" if paused else "自动识别已恢复")
-        self._push_state()
-
-    def set_hotkey_enabled(self, enabled: bool) -> None:
-        self.hotkey_enabled = enabled
-        if enabled:
-            self.hotkeys.start()
-            self.log("全局热键已启用")
-        else:
-            self.hotkeys.stop()
-            self.log("全局热键已关闭")
+    def toggle_pause(self) -> None:
+        self.paused = not self.paused
+        self.log("自动识别已暂停" if self.paused else "自动识别已恢复")
         self._push_state()
 
     # ── 性能与内存 ──────────────────────────────────────────
@@ -252,11 +213,8 @@ class Engine:
 
     # ── 退出 ────────────────────────────────────────────────
     def shutdown(self) -> None:
+        self._stop.set()
         self.outbox.put({"kind": "exit"})
-        try:
-            self.hotkeys.stop()
-        except Exception:
-            pass
         try:
             self.ocr.destroy()
         except Exception:
@@ -271,13 +229,12 @@ class Engine:
 def _process_memory_mb() -> float:
     try:
         import ctypes
-        from ctypes import wintypes
         psapi = ctypes.WinDLL("psapi")
         PROCESS_MEMORY_COUNTERS = (ctypes.c_ulong * 8)
         counters = PROCESS_MEMORY_COUNTERS()
         psapi.GetProcessMemoryInfo(
             ctypes.windll.kernel32.GetCurrentProcess(),
             ctypes.byref(counters), ctypes.sizeof(counters))
-        return round(counters[2] / (1024 * 1024), 1)   # WorkingSetSize
+        return round(counters[2] / (1024 * 1024), 1)
     except Exception:
         return 0.0

@@ -15,16 +15,10 @@ from .paths import BASE_DIR, CONFIG_PATH
 BASE_W, BASE_H = 2560, 1440
 
 _DEFAULT_CONFIG: dict = {
-    "version": 4,
-    "hotkeys": {
-        "manual": "~",
-        "pause": "f7",
-        "exit": "f8",
-        "interact": "f",
-    },
+    "version": 5,
     "auto_detect": True,
     "detect_timeout": 3.0,
-    "sample_interval": 0.5,
+    "sample_interval": 0.8,
     "center_scan": True,
     "scan_margin": 0.05,
     "fingerprint_auto_click": True,
@@ -155,21 +149,8 @@ class ConfigStore:
             except (OSError, ValueError):
                 loaded = {}
             self.raw = _merge(_DEFAULT_CONFIG, loaded)
-            self._migrate_hotkeys()
         self.refresh()
         return self.effective
-
-    def _migrate_hotkeys(self) -> None:
-        """旧版热键迁移：F5/F6/END -> ~ / F7 / F8；补齐默认键位。"""
-        hk = self.raw.get("hotkeys", {})
-        hk.pop("morse", None)
-        hk.pop("fingerprint", None)
-        if hk.get("exit", "").lower() in ("end", "esc"):
-            hk["exit"] = "f8"
-        hk.setdefault("manual", "~")
-        hk.setdefault("pause", "f7")
-        hk.setdefault("exit", "f8")
-        hk.setdefault("interact", "f")
 
     def refresh(self) -> None:
         self.effective = effective_config(self.raw)
@@ -182,10 +163,6 @@ class ConfigStore:
     def save(self) -> None:
         self._save_raw()
         self.refresh()
-
-    @property
-    def hotkeys(self) -> dict:
-        return self.effective.get("hotkeys", {})
 
     @property
     def regions(self) -> list:
@@ -209,7 +186,6 @@ class ConfigStore:
             with open(src_path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
             self.raw = _merge(_DEFAULT_CONFIG, loaded)
-            self._migrate_hotkeys()
             self._save_raw()
             self.refresh()
             return True

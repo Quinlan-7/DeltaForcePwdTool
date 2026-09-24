@@ -10,7 +10,6 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .hotkeys import preview_key
 from .paths import ICON_PATH, known_persons
 
 # ── 主题色板 ────────────────────────────────────────────────
@@ -179,20 +178,19 @@ class MainWindow(tk.Tk):
         self.badge_frame.pack(fill="x", padx=12, pady=(0, 4))
         self.badges = {}
         for key, label in (("ocr", "OCR"), ("auto", "自动识别"),
-                           ("state", "识别状态"), ("hk", "热键")):
+                           ("state", "识别状态")):
             b = tk.Label(self.badge_frame, text=f"{label}：--", bg=CARD2,
                          fg=DIM, font=_font(9), padx=8, pady=3)
             b.pack(side="left", padx=3)
             self.badges[key] = b
 
-        # 竖向单列：控制 / 参数 / 热键 / 配置 / 性能 依次排列
+        # 竖向单列：控制 / 参数 / 配置 / 性能 依次排列
         col = tk.Frame(self, bg=BG)
         col.pack(fill="both", expand=True, padx=8, pady=2)
         col.grid_columnconfigure(0, weight=1)
 
         self._build_control_card(col)
         self._build_param_card(col)
-        self._build_hotkey_card(col)
         self._build_config_card(col)
         self._build_perf_card(col)
 
@@ -200,7 +198,7 @@ class MainWindow(tk.Tk):
         self._build_log_card(col)
 
         # 底部提示
-        foot = tk.Label(self, text="游戏内按 F 交互自动检测 ｜ ~ 手动扫描 ｜ F7 暂停/恢复 ｜ F8 退出",
+        foot = tk.Label(self, text="全自动识别：游戏前台时每 0.8 秒自动检测密码界面",
                         bg=BG, fg=DIM, font=_font(8))
         foot.pack(fill="x", padx=14, pady=(2, 6))
 
@@ -269,12 +267,11 @@ class MainWindow(tk.Tk):
         self.log_text.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
-    # ── 右栏卡片 ────────────────────────────────────────────
+    # ── 卡片 ──────────────────────────────────────────────
     def _build_control_card(self, parent):
         body = self._vcard(parent, "识别控制")
 
         self.var_auto = tk.BooleanVar(value=True)
-        self.var_hotkey = tk.BooleanVar(value=True)
         self.var_center = tk.BooleanVar(value=True)
         self.var_lock = tk.BooleanVar(value=False)
         self.var_float = tk.BooleanVar(value=True)
@@ -282,8 +279,6 @@ class MainWindow(tk.Tk):
         def cb(flag):
             if flag == "auto":
                 self.app.on_auto_toggle(self.var_auto.get())
-            elif flag == "hotkey":
-                self.app.on_hotkey_toggle(self.var_hotkey.get())
             elif flag == "center":
                 self.app.cfg_store.raw["center_scan"] = self.var_center.get()
                 self.app.cfg_store.save()
@@ -306,8 +301,7 @@ class MainWindow(tk.Tk):
                     self.float_hint.hide()
 
         for text, var, flag in (
-            ("自动识别（游戏内按 F 交互后检测）", self.var_auto, "auto"),
-            ("全局热键总开关", self.var_hotkey, "hotkey"),
+            ("全自动识别", self.var_auto, "auto"),
             ("中心区域识别（降低性能消耗）", self.var_center, "center"),
             ("识别区域记忆锁定", self.var_lock, "lock"),
             ("识别结果悬浮提示", self.var_float, "float"),
@@ -319,14 +313,14 @@ class MainWindow(tk.Tk):
 
         row = tk.Frame(body, bg=CARD)
         row.pack(fill="x", pady=(5, 0))
-        self.btn_manual = tk.Button(row, text="手动扫描 (~)",
+        self.btn_manual = tk.Button(row, text="立即扫描",
                                     command=self.app.on_manual_click,
                                     bg=ACCENT, fg="#0B1220", relief="flat",
                                     font=_font(10, True), padx=12, pady=4,
                                     activebackground=ACCENT_D,
                                     activeforeground="#FFFFFF")
         self.btn_manual.pack(side="left", padx=(0, 8))
-        self.btn_pause = tk.Button(row, text="暂停自动识别",
+        self.btn_pause = tk.Button(row, text="暂停识别",
                                    command=self.app.on_pause_click,
                                    bg=CARD2, fg=TEXT, relief="flat",
                                    font=_font(10), padx=12, pady=4,
@@ -382,28 +376,6 @@ class MainWindow(tk.Tk):
         self.interval_val.config(text="0.50s")
         self.timeout_val.config(text="3.0s")
 
-    def _build_hotkey_card(self, parent):
-        body = self._vcard(parent, "热键自定义")
-        self.hk_vars = {}
-        grid = tk.Frame(body, bg=CARD)
-        grid.pack(fill="x")
-        labels = (("手动扫描", "manual"), ("暂停/恢复", "pause"),
-                  ("完全退出", "exit"), ("游戏交互键", "interact"))
-        for i, (label, key) in enumerate(labels):
-            r, c = divmod(i, 2)
-            tk.Label(grid, text=label, bg=CARD, fg=DIM,
-                     font=_font(9)).grid(row=r, column=c * 2, sticky="w",
-                                         padx=(0, 6), pady=2)
-            var = tk.StringVar()
-            e = tk.Entry(grid, textvariable=var, bg=CARD2, fg=TEXT,
-                         insertbackground=TEXT, relief="flat", width=8,
-                         justify="center", font=_font(9))
-            e.grid(row=r, column=c * 2 + 1, sticky="w", pady=2, ipady=1)
-            self.hk_vars[key] = var
-        tk.Button(body, text="应用热键", command=self.app.apply_hotkeys,
-                  bg=CARD2, fg=ACCENT, relief="flat", font=_font(9),
-                  activebackground=CARD).pack(anchor="w", pady=(4, 0))
-
     def _build_config_card(self, parent):
         body = self._vcard(parent, "配置与学习")
         self.var_learn = tk.BooleanVar(value=True)
@@ -458,7 +430,6 @@ class MainWindow(tk.Tk):
     def _load_controls(self):
         cfg = self.app.cfg_store.effective
         self.var_auto.set(bool(cfg.get("auto_detect", True)))
-        self.var_hotkey.set(True)
         self.var_center.set(bool(cfg.get("center_scan", True)))
         ui = cfg.get("ui", {})
         self.var_lock.set(bool(ui.get("region_lock", False)))
@@ -466,11 +437,8 @@ class MainWindow(tk.Tk):
         self.var_learn.set(bool(ui.get("learning", True)))
         self.var_threshold.set(float(cfg.get("fingerprint", {}).get(
             "match_threshold", 0.5)))
-        self.var_interval.set(float(cfg.get("sample_interval", 0.5)))
+        self.var_interval.set(float(cfg.get("sample_interval", 0.8)))
         self.var_timeout.set(float(cfg.get("detect_timeout", 3.0)))
-        hk = cfg.get("hotkeys", {})
-        for key, var in self.hk_vars.items():
-            var.set(hk.get(key, ""))
         self.threshold_val.config(text=f"{self.var_threshold.get():.2f}")
         self.interval_val.config(text=f"{self.var_interval.get():.2f}s")
         self.timeout_val.config(text=f"{self.var_timeout.get():.1f}s")
@@ -490,8 +458,7 @@ class MainWindow(tk.Tk):
             pass
 
     # ── 状态更新（由主线程轮询调用）─────────────────────────
-    _BADGE_TEXT = {"ocr": "OCR", "auto": "自动识别", "state": "识别状态",
-                   "hk": "热键"}
+    _BADGE_TEXT = {"ocr": "OCR", "auto": "自动识别", "state": "识别状态"}
 
     def set_badge(self, key: str, text: str, color: str = DIM):
         b = self.badges.get(key)

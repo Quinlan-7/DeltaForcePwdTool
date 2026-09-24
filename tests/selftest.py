@@ -2,11 +2,9 @@
 """自检程序：验证核心模块可用性（不启动 GUI、不写日志文件）。"""
 
 import sys
-import time
 
 from app import morse
 from app.config_store import ConfigStore, screen_size
-from app.hotkeys import HotkeyManager
 from app.learning import Experience
 from app.ocr_engine import OcrEngine
 from app.paths import known_persons
@@ -26,14 +24,14 @@ def _check(name: str, ok: bool, detail: str = ""):
 
 
 def _test_config():
-    print("[1/6] 配置加载与分辨率缩放")
+    print("[1/5] 配置加载与分辨率缩放")
     try:
         store = ConfigStore()
         eff = store.effective
-        _check("配置加载", bool(eff.get("regions")) and bool(eff.get("hotkeys")))
-        _check("热键默认值", eff["hotkeys"].get("manual") == "~" and
-               eff["hotkeys"].get("exit") == "f8",
-               str(eff.get("hotkeys")))
+        _check("配置加载", bool(eff.get("regions")) and eff.get("sample_interval") > 0)
+        _check("默认全自动识别", eff.get("auto_detect") is True
+               and abs(eff.get("sample_interval", 0) - 0.8) < 0.01,
+               f"interval={eff.get('sample_interval')}")
         _check("分辨率适配", len(eff.get("regions", [])) == 3,
                f"屏幕 {screen_size()}")
     except Exception as e:  # noqa: BLE001
@@ -41,7 +39,7 @@ def _test_config():
 
 
 def _test_morse():
-    print("[2/6] 摩斯解码（纯视觉）")
+    print("[2/5] 摩斯解码（纯视觉）")
     try:
         all_ok = True
         for digit in "0123456789":
@@ -71,7 +69,7 @@ def _test_morse():
 
 
 def _test_ocr():
-    print("[3/6] 本地 OCR 引擎（离线）")
+    print("[3/5] 本地 OCR 引擎（离线）")
     try:
         eng = OcrEngine()
         ok = eng.init()
@@ -101,7 +99,7 @@ def _test_ocr():
 
 
 def _test_fingerprint():
-    print("[4/6] 指纹模板匹配")
+    print("[4/5] 指纹模板匹配")
     try:
         from app import fingerprint as fp
         from app.paths import IMAGES_DIR
@@ -133,28 +131,8 @@ def _test_fingerprint():
         _check("指纹匹配", False, str(e))
 
 
-def _test_hotkeys():
-    print("[5/6] 全局热键注册（无管理员）")
-    try:
-        hk = HotkeyManager()
-        invalid = hk.set_bindings({"manual": "~", "pause": "f7",
-                                   "exit": "f8", "interact": "f"})
-        ok = hk.start()
-        _check("热键注册", ok and not invalid, hk.last_error() or "OK")
-        time.sleep(0.3)
-        hk.stop()
-        _check("热键注销", True)
-        # 无效键检测
-        hk2 = HotkeyManager()
-        inv = hk2.set_bindings({"bad": "not_a_key"})
-        _check("无效键检测", inv and inv[0][0] == "bad", str(inv))
-        hk2.stop()
-    except Exception as e:  # noqa: BLE001
-        _check("热键管理", False, str(e))
-
-
 def _test_learning():
-    print("[6/6] 自主学习缓存")
+    print("[5/5] 自主学习缓存")
     try:
         import os
         path = os.path.join(os.path.dirname(__file__), "..", "experience_test.json")
@@ -182,7 +160,6 @@ def run_all() -> bool:
     _test_morse()
     _test_ocr()
     _test_fingerprint()
-    _test_hotkeys()
     _test_learning()
     print("=" * 50)
     print(f"  通过 {_PASS} 项，失败 {_FAIL} 项")
