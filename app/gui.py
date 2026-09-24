@@ -106,12 +106,13 @@ class MainWindow(tk.Tk):
                 self.iconbitmap(ICON_PATH)
         except Exception:
             pass
-        self.minsize(1080, 760)
-        self.geometry("1180x860")
+        self.minsize(500, 820)
+        self.geometry("580x1020")
 
         self._build_style()
         self._build_layout()
         self._build_float_hint()
+        self._build_correct_popup()
         self._load_controls()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -168,107 +169,98 @@ class MainWindow(tk.Tk):
         head = tk.Frame(self, bg=BG)
         head.pack(fill="x", padx=14, pady=(10, 4))
         ttl = tk.Label(head, text="三角洲密码工具", bg=BG, fg=TEXT,
-                       font=_font(17, True))
+                       font=_font(16, True))
         ttl.pack(side="left")
-        sub = tk.Label(head, text="By：Quinlan   Qq：704979478", bg=BG,
-                       fg=ACCENT, font=_font(10))
-        sub.pack(side="left", padx=(10, 0), pady=(6, 0))
+        sub = tk.Label(head, text="By：Quinlan  Qq：704979478", bg=BG,
+                       fg=ACCENT, font=_font(9))
+        sub.pack(side="left", padx=(8, 0), pady=(5, 0))
 
-        self.badge_frame = tk.Frame(head, bg=BG)
-        self.badge_frame.pack(side="right")
+        self.badge_frame = tk.Frame(self, bg=BG)
+        self.badge_frame.pack(fill="x", padx=12, pady=(0, 4))
         self.badges = {}
         for key, label in (("ocr", "OCR"), ("auto", "自动识别"),
                            ("state", "识别状态"), ("hk", "热键")):
             b = tk.Label(self.badge_frame, text=f"{label}：--", bg=CARD2,
-                         fg=DIM, font=_font(9), padx=10, pady=4)
+                         fg=DIM, font=_font(9), padx=8, pady=3)
             b.pack(side="left", padx=3)
             self.badges[key] = b
 
-        # 主体两栏
-        body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=8, pady=4)
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=26)
-        body.grid_columnconfigure(1, weight=34)
+        # 竖向单列：控制 / 参数 / 热键 / 配置 / 性能 依次排列
+        col = tk.Frame(self, bg=BG)
+        col.pack(fill="both", expand=True, padx=8, pady=2)
+        col.grid_columnconfigure(0, weight=1)
 
-        # 左栏
-        left = tk.Frame(body, bg=BG)
-        left.grid(row=0, column=0, sticky="nsew")
-        left.grid_rowconfigure(0, weight=1)
-        left.grid_rowconfigure(1, weight=0)
-        left.grid_columnconfigure(0, weight=1)
+        self._build_control_card(col)
+        self._build_param_card(col)
+        self._build_hotkey_card(col)
+        self._build_config_card(col)
+        self._build_perf_card(col)
 
-        self._build_result_card(left)
-        self._build_log_card(left)
-
-        # 右栏：五张卡片直接排布，全部完整可见
-        right = tk.Frame(body, bg=BG)
-        right.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
-        right.grid_columnconfigure(0, weight=1)
-
-        self._build_control_card(right)
-        self._build_param_card(right)
-        self._build_hotkey_card(right)
-        self._build_config_card(right)
-        self._build_perf_card(right)
+        # 事件日志置于底部并占据剩余高度
+        self._build_log_card(col)
 
         # 底部提示
-        foot = tk.Label(self, text="游戏内按 F 交互自动检测 ｜ ~ 手动扫描 ｜ F7 暂停/恢复自动识别 ｜ F8 完全退出",
-                        bg=BG, fg=DIM, font=_font(9))
-        foot.pack(fill="x", padx=14, pady=(2, 8))
+        foot = tk.Label(self, text="游戏内按 F 交互自动检测 ｜ ~ 手动扫描 ｜ F7 暂停/恢复 ｜ F8 退出",
+                        bg=BG, fg=DIM, font=_font(8))
+        foot.pack(fill="x", padx=14, pady=(2, 6))
 
-    # ── 左栏卡片 ────────────────────────────────────────────
-    def _build_result_card(self, parent):
-        body = self._card(parent, "识别结果", 0, 0)
-
-        self.result_type = tk.Label(body, text="等待识别...", bg=CARD,
-                                    fg=DIM, font=_font(11, True))
-        self.result_type.pack(anchor="w")
-
-        self.result_big = tk.Label(body, text="--", bg=CARD, fg=TEXT,
-                                   font=_font(20, True), anchor="w")
-        self.result_big.pack(anchor="w", pady=(2, 2))
-
-        info = tk.Frame(body, bg=CARD)
-        info.pack(fill="x")
-        info.grid_columnconfigure(1, weight=1)
-        self.result_info = {}
-        fields = [("人名", "person"), ("模式", "mode"), ("置信度", "conf"),
-                  ("状态", "status"), ("耗时", "elapsed"), ("时间", "time")]
-        for i, (label, key) in enumerate(fields):
-            row, col = divmod(i, 2)
-            tk.Label(info, text=label, bg=CARD, fg=DIM,
-                     font=_font(9)).grid(row=row, column=col * 2, sticky="w", padx=(0, 6), pady=1)
-            v = tk.Label(info, text="--", bg=CARD, fg=TEXT, font=_font(9), anchor="w")
-            v.grid(row=row, column=col * 2 + 1, sticky="w", pady=1)
-            self.result_info[key] = v
-
-        # 人名纠正面板（仅在指纹人名未确认时出现）
-        self.correct_frame = tk.Frame(body, bg=CARD2, highlightbackground=AMBER,
-                                      highlightthickness=1)
+    # ── 人名纠正弹窗（浮动小窗，不占主界面位置）──────────────
+    def _build_correct_popup(self):
+        win = tk.Toplevel(self)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=CARD2, highlightbackground=AMBER,
+                      highlightthickness=1)
+        win.withdraw()
+        self.correct_win = win
+        tk.Label(win, text="OCR 人名未确认：", bg=CARD2, fg=AMBER,
+                 font=_font(9)).pack(anchor="w", padx=10, pady=(8, 0))
         self.correct_raw = tk.StringVar()
+        tk.Label(win, textvariable=self.correct_raw, bg=CARD2, fg=TEXT,
+                 font=_font(9), anchor="w", wraplength=240).pack(
+            fill="x", padx=10)
+        row = tk.Frame(win, bg=CARD2)
+        row.pack(fill="x", padx=10, pady=8)
         self.correct_choice = tk.StringVar()
-        tk.Label(self.correct_frame, text="OCR人名未确认：", bg=CARD2,
-                 fg=AMBER, font=_font(9)).pack(anchor="w", padx=8, pady=(6, 0))
-        tk.Label(self.correct_frame, textvariable=self.correct_raw, bg=CARD2,
-                 fg=TEXT, font=_font(9), anchor="w").pack(fill="x", padx=8)
-        row = tk.Frame(self.correct_frame, bg=CARD2)
-        row.pack(fill="x", padx=8, pady=6)
-        self.correct_combo = ttk.Combobox(row, textvariable=self.correct_choice,
-                                          values=known_persons(), state="readonly",
-                                          width=12)
+        self.correct_combo = ttk.Combobox(
+            row, textvariable=self.correct_choice, values=known_persons(),
+            state="readonly", width=10)
         self.correct_combo.pack(side="left")
-        tk.Button(row, text="记住纠正并重试", command=self._confirm_correct,
-                  bg=CARD2, fg=AMBER, relief="flat", font=_font(9),
-                  activebackground=CARD, activeforeground=AMBER).pack(side="left", padx=6)
-        tk.Button(row, text="关闭", command=lambda: self.correct_frame.pack_forget(),
-                  bg=CARD2, fg=DIM, relief="flat", font=_font(9),
+        tk.Button(row, text="记住并重试", command=self._confirm_correct,
+                  bg=CARD, fg=AMBER, relief="flat", font=_font(9),
+                  activebackground=CARD).pack(side="left", padx=6)
+        tk.Button(row, text="关闭", command=self._hide_correct,
+                  bg=CARD, fg=DIM, relief="flat", font=_font(9),
                   activebackground=CARD).pack(side="left")
 
+    def _show_correct(self, raw: str):
+        self.correct_raw.set(raw or "")
+        self.correct_choice.set("")
+        try:
+            x = self.winfo_x() + self.winfo_width() - 280
+            y = self.winfo_y() + 120
+            self.correct_win.geometry(f"280x110+{x}+{y}")
+            self.correct_win.deiconify()
+            self.correct_win.lift()
+        except Exception:
+            pass
+
+    def _hide_correct(self):
+        try:
+            self.correct_win.withdraw()
+        except Exception:
+            pass
+
     def _build_log_card(self, parent):
-        body = self._card(parent, "事件日志（仅内存显示，不写入任何文件）", 1, 0)
-        wrap = tk.Frame(body, bg=CARD)
-        wrap.pack(fill="both", expand=True)
+        frame = tk.Frame(parent, bg=CARD, highlightbackground=LINE,
+                         highlightthickness=1)
+        frame.pack(fill="both", expand=True, pady=(4, 0))
+        head = tk.Label(frame, text="事件日志", bg=CARD, fg=ACCENT,
+                        font=_font(10, True), anchor="w")
+        head.pack(fill="x", padx=10, pady=(5, 1))
+        tk.Frame(frame, bg=LINE, height=1).pack(fill="x", padx=6)
+        wrap = tk.Frame(frame, bg=CARD)
+        wrap.pack(fill="both", expand=True, padx=8, pady=(2, 6))
         self.log_text = tk.Text(wrap, bg="#121A24", fg=TEXT, font=_font(9),
                                 relief="flat", wrap="word", padx=6, pady=4,
                                 state="disabled", height=5)
@@ -391,7 +383,7 @@ class MainWindow(tk.Tk):
         self.timeout_val.config(text="3.0s")
 
     def _build_hotkey_card(self, parent):
-        body = self._vcard(parent, "热键自定义（点击“应用”后全局生效）")
+        body = self._vcard(parent, "热键自定义")
         self.hk_vars = {}
         grid = tk.Frame(body, bg=CARD)
         grid.pack(fill="x")
@@ -441,7 +433,7 @@ class MainWindow(tk.Tk):
             self.cfg_buttons[text] = btn
 
     def _build_perf_card(self, parent):
-        body = self._vcard(parent, "性能监控（内存运行数据）")
+        body = self._vcard(parent, "性能监控")
         grid = tk.Frame(body, bg=CARD)
         grid.pack(fill="x")
         self.perf_labels = {}
@@ -516,70 +508,33 @@ class MainWindow(tk.Tk):
         self.log_text.configure(state="disabled")
 
     def show_result(self, result: dict):
-        from datetime import datetime
-        now = datetime.now().strftime("%H:%M:%S")
         rtype = result.get("type", "")
         if rtype == "morse":
             pwd = result.get("password", "")
             confs = result.get("conf", [])
-            self.result_type.config(text="摩斯密码识别", fg=ACCENT)
-            self.result_big.config(text=pwd if pwd else "识别失败", fg=TEXT)
-            self.result_info["person"].config(text="-")
-            self.result_info["mode"].config(text="-")
-            self.result_info["conf"].config(
-                text=" / ".join(f"{c:.2f}" for c in confs))
-            self.result_info["status"].config(
-                text="已输入" if result.get("clicked") else "待手动输入",
-                fg=OK if result.get("clicked") else AMBER)
-            self.result_info["elapsed"].config(text=f"{result.get('elapsed', 0)}s")
-            self.result_info["time"].config(text=now)
-            self.float_hint.show(f"摩斯密码  {pwd}", ACCENT)
-            self.correct_frame.pack_forget()
+            if pwd:
+                self.float_hint.show(f"摩斯密码  {pwd}", ACCENT)
+                self.append_log(f"摩斯识别完成：{pwd}  置信度 "
+                                + "/".join(f"{c:.2f}" for c in confs)
+                                + ("（已自动输入）" if result.get("clicked") else "（待手动输入）"))
+            else:
+                self.append_log("摩斯识别失败")
+            self._hide_correct()
         elif rtype == "fingerprint":
             person = result.get("person", "") or "?"
             mode = result.get("mode", "")
-            status_map = {
-                "name_unknown": ("人名未确认", AMBER),
-                "number_unread": ("数字未读取", DANGER),
-                "no_fingerprint_ui": ("非指纹界面", DANGER),
-                "no_templates": ("缺少模板", DANGER),
-                "no_match": ("未匹配", DANGER),
-                "unstable": ("画面不稳定", AMBER),
-                "ok": ("识别成功", OK),
-                "partial": ("部分匹配", AMBER),
-                "fail": ("失败", DANGER),
-            }
-            st, st_color = status_map.get(result.get("status", ""),
-                                          (result.get("status", "?"), DIM))
-            plan = result.get("click_plan", [])
-            self.result_type.config(text="指纹密码识别", fg=ACCENT)
-            self.result_big.config(
-                text=f"{person}  {mode}模式" if person and person != "?"
-                else "指纹识别", fg=TEXT)
-            self.result_info["person"].config(text=person)
-            self.result_info["mode"].config(text=mode)
-            self.result_info["conf"].config(
-                text=f"{result.get('person_ratio', 0):.2f}")
-            self.result_info["status"].config(text=st, fg=st_color)
-            self.result_info["elapsed"].config(text=f"{result.get('elapsed', 0)}s")
-            self.result_info["time"].config(text=now)
-            self.float_hint.show(
-                f"{person} {mode}模式  {st}\n"
-                + ("  ".join(f"#{p['template']}→候选{p['candidate']}"
-                             for p in plan[:4])),
-                st_color)
-            self._maybe_show_correct(result)
-        else:
-            self.result_type.config(text="等待识别...", fg=DIM)
-            self.result_big.config(text="--", fg=TEXT)
-
-    def _maybe_show_correct(self, result: dict):
-        if result.get("status") == "name_unknown" and result.get("person_raw"):
-            self.correct_raw.set(result.get("person_raw", ""))
-            self.correct_choice.set("")
-            self.correct_frame.pack(fill="x", pady=(8, 0))
-        else:
-            self.correct_frame.pack_forget()
+            st = result.get("status", "?")
+            if st == "ok":
+                self.float_hint.show(f"{person} {mode}模式  识别成功", OK)
+                self.append_log(f"指纹识别成功：{person} {mode}模式")
+            elif st == "name_unknown" and result.get("person_raw"):
+                self.float_hint.show(f"人名未确认：{result.get('person_raw')}", AMBER)
+                self._show_correct(result.get("person_raw", ""))
+            elif st in ("no_fingerprint_ui",):
+                pass
+            else:
+                self.float_hint.show(f"指纹：{person} {mode} {st}", AMBER)
+                self.append_log(f"指纹识别：{person} {mode} {st}")
 
     def _confirm_correct(self):
         raw = self.correct_raw.get().strip()
@@ -593,7 +548,7 @@ class MainWindow(tk.Tk):
         except Exception:
             pass
         self.append_log(f"已记住纠错：{raw} -> {person}")
-        self.correct_frame.pack_forget()
+        self._hide_correct()
         self.app.on_manual_click()
 
     # ── 性能 ────────────────────────────────────────────────

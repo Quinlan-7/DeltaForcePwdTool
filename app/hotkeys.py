@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-全局热键管理：基于 Win32 RegisterHotKey + 消息循环线程实现。
-- 无需管理员权限（原版 keyboard 库需要管理员）。
-- 通过消息队列向主线程投递事件，由 tkinter 轮询分发。
-- 支持自定义键位：单键（~ / f7 / f8 / f 等）或带修饰键（ctrl+f1）。
+全局热键管理：
+- ~ / F7 / F8 等：RegisterHotKey 全局注册（不影响普通打字）。
+- 游戏交互键（如 F 字母键）：不使用 RegisterHotKey（那会全局吞掉 F，
+  导致打字时 F 无响应）。改用 WH_KEYBOARD_LL 低层钩子“观察”按键，
+  仅当前台窗口是游戏时才触发 interact 事件；按键始终原样放行，
+  打字 / 聊天 / 在本工具输入框按 F 都不受影响。
 """
 
 import ctypes
+import os
 import queue
 import threading
 import time
@@ -21,6 +24,21 @@ MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_NOREPEAT = 0x4000
+
+WH_KEYBOARD_LL = 13
+WM_KEYDOWN = 0x0100
+
+LRESULT = ctypes.c_ssize_t
+HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM,
+                              wintypes.LPARAM)
+
+
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("vkCode", wintypes.DWORD),
+                ("scanCode", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG))]
 
 _VK = {
     "~": 0xC0, "`": 0xC0,
@@ -53,31 +71,72 @@ def _vk_of(key: str) -> int | None:
     return None
 
 
+def _is_typing_key(vk: int) -> bool:
+    """字母/数字键属于打字键——不能用 RegisterHotKey 吞掉。"""
+    return 0x30 <= vk <= 0x5A
+
+
+def _foreground_is_game() -> bool:
+    """判断当前前台窗口是否属于三角洲行动（避免在别的程序里按 F 误触发）。"""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    # 进程名判断
+    try:
+        h = _kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
+        if h:
+            buf = ctypes.create_unicode_buffer(260)
+            size = wintypes.DWORD(260)
+            if _kernel32.QueryFullProcessImageNameW(h, 0, buf,
+                                                    ctypes.byref(size)):
+                name = os.path.basename(buf.value).lower()
+            else:
+                name = ""
+            _kernel32.CloseHandle(h)
+            if "delta" in name:
+                return True
+    except Exception:
+        pass
+    # 标题兜底
+    try:
+        n = _user32.GetWindowTextLengthW(hwnd)
+        if n:
+            b = ctypes.create_unicode_buffer(n + 1)
+            _user32.GetWindowTextW(hwnd, b, n + 1)
+            if "三角洲" in b.value or "delta" in b.value.lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 class HotkeyManager:
-    """全局热键管理器。使用方式：
-        hk = HotkeyManager()
-        hk.set_bindings({"manual": "~", "pause": "f7", "exit": "f8", "interact": "f"})
-        hk.start()
-        # 主循环轮询 hk.drain()
-        hk.stop()
-    """
+    """全局热键管理器。"""
 
     def __init__(self):
         self.events: queue.Queue = queue.Queue()
         self._bindings: dict = {}      # name -> key_str
-        self._vk_map: dict = {}        # name -> (modifiers, vk)
+        self._vk_map: dict = {}        # name -> (mods, vk)  仅 RegisterHotKey
+        self._observe_vk = 0           # interact 的打字键 vk（LL 钩子观察）
+        self._observe_name = ""        # 通常为 "interact"
         self._id_map: dict = {}        # name -> hotkey id
         self._thread = None
         self._stop = threading.Event()
         self._hwnd = None
         self._ready = threading.Event()
         self._last_error = ""
+        self._hook = None
+        self._hook_ref = None
 
     # ── 绑定管理 ────────────────────────────────────────────
     def set_bindings(self, bindings: dict) -> list:
         """设置 {名称: 键位}，返回无效键位列表。"""
         invalid = []
         new_vk = {}
+        self._observe_vk = 0
+        self._observe_name = ""
         for name, key in bindings.items():
             vk = _vk_of(key)
             if vk is None:
@@ -104,6 +163,12 @@ class HotkeyManager:
                 vk = _vk_of(parts[-1])
                 if vk is None:
                     invalid.append((name, key))
+                    continue
+            else:
+                # 单键：若是打字字母/数字键，则改为观察模式（不吞键）
+                if _is_typing_key(vk):
+                    self._observe_vk = vk
+                    self._observe_name = name
                     continue
             new_vk[name] = (mods, vk)
         self._bindings = {n: k for n, k in bindings.items() if (n, k) not in invalid}
@@ -152,6 +217,17 @@ class HotkeyManager:
             _user32.UnregisterHotKey(hwnd, hid)
         self._id_map.clear()
 
+    def _ll_hook_cb(self, nCode, wParam, lParam):
+        try:
+            if nCode >= 0 and wParam == WM_KEYDOWN and self._observe_vk:
+                kb = ctypes.cast(lParam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
+                if kb.vkCode == self._observe_vk and not (kb.flags & 0x80):
+                    if _foreground_is_game():
+                        self.events.put(self._observe_name)
+        except Exception:
+            pass
+        return _user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
+
     def _loop(self) -> None:
         try:
             hinst = _kernel32.GetModuleHandleW(None)
@@ -165,6 +241,14 @@ class HotkeyManager:
             return
         self._hwnd = hwnd
         self._register_all(hwnd)
+
+        # 安装低层键盘钩子（仅观察 interact 打字键，不拦截）
+        try:
+            self._hook_ref = HOOKPROC(self._ll_hook_cb)
+            self._hook = _user32.SetWindowsHookExW(
+                WH_KEYBOARD_LL, self._hook_ref, hinst, 0)
+        except Exception:
+            self._hook = None
         self._ready.set()
 
         msg = wintypes.MSG()
@@ -179,6 +263,13 @@ class HotkeyManager:
             _user32.TranslateMessage(ctypes.byref(msg))
             _user32.DispatchMessageW(ctypes.byref(msg))
 
+        if self._hook:
+            try:
+                _user32.UnhookWindowsHookEx(self._hook)
+            except Exception:
+                pass
+        self._hook = None
+        self._hook_ref = None
         self._unregister_all(hwnd)
         _user32.DestroyWindow(hwnd)
         self._hwnd = None

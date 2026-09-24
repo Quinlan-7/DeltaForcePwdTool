@@ -66,7 +66,7 @@ class AppController:
         ok = self.ocr.init()
         if ok:
             mode = "本地模型" if self.ocr.using_local_models else "内置模型"
-            self.gui.set_badge("ocr", f"就绪（{mode}）", OK)
+            self.gui.set_badge("ocr", "就绪", OK)
             self.append_log(f"OCR 引擎初始化成功（{mode}，离线可用，无微信依赖）")
         else:
             self.gui.set_badge("ocr", "失败", DANGER)
